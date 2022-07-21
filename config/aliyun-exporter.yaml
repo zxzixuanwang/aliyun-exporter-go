@@ -1,0 +1,30 @@
+log:
+ level: info
+
+eip:
+  sleep: 100
+  # like cms-export.cn-shanghai.aliyuncs.com
+  endpoint: xx
+
+services:
+  env: prod
+  port: :9700
+  name: aliyun-exporter
+  metricsOpen: false
+  maxRequest: 10
+  metricPath: /metrics
+
+aliyun:
+  accessToken: xxx
+  secretToken: xxx
+  region: xxx
+  skipRegion: 
+  - xx
+  - xx
+
+
+
+
+
+
+  
