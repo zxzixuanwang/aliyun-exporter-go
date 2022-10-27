@@ -1,13 +1,10 @@
 package acsvpceip
 
 import (
-	"runtime/debug"
-
 	"github.com/go-kit/log"
 	"github.com/zxzixuanwang/aliyun-exporter-go/cfg"
+	"github.com/zxzixuanwang/aliyun-exporter-go/pkg/exportdata"
 	"github.com/zxzixuanwang/aliyun-exporter-go/tools"
-
-	"time"
 
 	cms_export20211101 "github.com/alibabacloud-go/cms-export-20211101/client"
 	openapi "github.com/alibabacloud-go/darabonba-openapi/client"
@@ -62,7 +59,7 @@ func NewAliyunNetworkMonitorService(region string, accessToken string, secret st
 	clientExport, err := cms_export20211101.NewClient(&openapi.Config{
 		AccessKeyId:     &accessToken,
 		AccessKeySecret: &secret,
-		Endpoint:        tools.String2point(cfg.ConfigCollection.Eip.EndPoint),
+		Endpoint:        tools.GetPoint(cfg.ConfigCollection.Eip.EndPoint),
 	})
 	if err != nil {
 		level.Error(log).Log("获取err is", err)
@@ -80,92 +77,66 @@ type LabelValue struct {
 }
 
 func (a *aliyun) GetAcsEipBy(in *Input) (map[string]*LabelValue, error) {
-	defer func() {
-		err := recover()
-		if err != nil {
-			level.Error(a.Log).Log("触发recover", string(debug.Stack()), "err:", err)
-		}
-	}()
 	in.TimePlus = 2
-	level.Info(a.Log).Log("获取eip,指标%s", in.Metrics)
-
-	endTime := time.Now().Local()
-	endTimeInt := endTime.UnixNano() / 1e6
-	startTime := endTime.Add(time.Duration(-1*int(in.TimePlus)) * time.Minute)
-	startTimeInt := startTime.UnixNano() / 1e6
-	cursorRequest := &cms_export20211101.CursorRequest{
-		EndTime:   &endTimeInt,
-		StartTime: &startTimeInt,
-		Namespace: &in.Namespace,
-		Period:    tools.Int322point(int32(in.Period)),
-		Metric:    &in.Metrics,
+	searchInput := &exportdata.Input{
+		Namespace:  in.Namespace,
+		Metrics:    in.Metrics,
+		TimePlus:   in.TimePlus,
+		Length:     in.Length,
+		Period:     in.Period,
+		InstanceId: in.InstanceId,
 	}
 
-	o, err := a.Client.Cursor(cursorRequest)
-	if err != nil {
-		level.Error(a.Log).Log("获取 cursor 指标", in.Metrics, "err is", err)
-		return nil, err
-	}
-	if o.Body.Data == nil {
-		level.Error(a.Log).Log("获取 cursor 指标", in.Metrics, "err is", o.Body.Message)
-		return nil, err
-	}
-	c := o.Body.Data.Cursor
-	get, err := a.Client.BatchGet(&cms_export20211101.BatchGetRequest{
-		Namespace: cursorRequest.Namespace,
-		Metric:    cursorRequest.Metric,
-		Cursor:    c,
-		Length:    tools.Int322point(1000),
-	})
-	if err != nil {
-		level.Error(a.Log).Log("获取 batch 指标", in.Metrics, "err is", err)
-		return nil, err
-	}
+	f := func(get *cms_export20211101.BatchGetResponse) map[string]*LabelValue {
 
-	if get.Body.Data == nil {
-		level.Error(a.Log).Log("获取 batch data 失败 指标", in.Metrics, "err is", o.Body.Message)
-		return nil, err
-	}
-	tmpMap := make(map[string]*LabelValue, 10)
-	for _, v := range get.Body.Data.Records {
-		if tmpMap[*v.LabelValues[1]] != nil {
-			if *v.Timestamp > tmpMap[*v.LabelValues[1]].Time {
-				if in.Metrics == "net_rx.rate" ||
-					in.Metrics == "net_rxPkgs.rate" ||
-					in.Metrics == "net_tx.rate" ||
-					in.Metrics == "net_txPkgs.rate" {
+		tmpMap := make(map[string]*LabelValue, 10)
+		for _, v := range get.Body.Data.Records {
+			if tmpMap[*v.LabelValues[1]] != nil {
+				if *v.Timestamp > tmpMap[*v.LabelValues[1]].Time {
+					if in.Metrics == "net_rx.rate" ||
+						in.Metrics == "net_rxPkgs.rate" ||
+						in.Metrics == "net_tx.rate" ||
+						in.Metrics == "net_txPkgs.rate" {
 
-					tmpMap[*v.LabelValues[1]] = &LabelValue{
-						Time:  *v.Timestamp,
-						Value: *v.MeasureValues[0],
+						tmpMap[*v.LabelValues[1]] = &LabelValue{
+							Time:  *v.Timestamp,
+							Value: *v.MeasureValues[0],
+						}
+					} else {
+						tmpMap[*v.LabelValues[1]] = &LabelValue{
+							Time:  *v.Timestamp,
+							Value: *v.MeasureValues[2],
+						}
 					}
-				} else {
-					tmpMap[*v.LabelValues[1]] = &LabelValue{
-						Time:  *v.Timestamp,
-						Value: *v.MeasureValues[2],
-					}
+
 				}
-
+				continue
 			}
-			continue
+			if in.Metrics == "net_rx.rate" ||
+				in.Metrics == "net_rxPkgs.rate" ||
+				in.Metrics == "net_tx.rate" ||
+				in.Metrics == "net_txPkgs.rate" {
+
+				tmpMap[*v.LabelValues[1]] = &LabelValue{
+					Time:  *v.Timestamp,
+					Value: *v.MeasureValues[0],
+				}
+			} else {
+				tmpMap[*v.LabelValues[1]] = &LabelValue{
+					Time:  *v.Timestamp,
+					Value: *v.MeasureValues[2],
+				}
+			}
+
 		}
-		if in.Metrics == "net_rx.rate" ||
-			in.Metrics == "net_rxPkgs.rate" ||
-			in.Metrics == "net_tx.rate" ||
-			in.Metrics == "net_txPkgs.rate" {
-
-			tmpMap[*v.LabelValues[1]] = &LabelValue{
-				Time:  *v.Timestamp,
-				Value: *v.MeasureValues[0],
-			}
-		} else {
-			tmpMap[*v.LabelValues[1]] = &LabelValue{
-				Time:  *v.Timestamp,
-				Value: *v.MeasureValues[2],
-			}
-		}
-
+		return tmpMap
 	}
+
+	tmpMap, err := exportdata.BatchGet(a.Client, searchInput, a.Log, f)
+	if err != nil {
+		return nil, err
+	}
+
 	for k, v := range tmpMap {
 		level.Info(a.Log).Log("时间内获取指标", in.Metrics, "实例", k, "值", v.Value)
 	}
