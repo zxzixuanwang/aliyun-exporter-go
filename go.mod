@@ -1,6 +1,6 @@
 module github.com/zxzixuanwang/aliyun-exporter-go
 
-go 1.17
+go 1.18
 
 require (
 	github.com/alibabacloud-go/cms-export-20211101 v1.0.5
